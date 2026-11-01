@@ -13,7 +13,7 @@ This is "open retrieval" and it is where:
   - the cross-encoder reranker shows a real boost.
 
 Run:
-    python src/01b_open_retrieval.py --dataset hotpotqa --n 500
+    python experiments/01b_open_retrieval.py --dataset hotpotqa --n 500
 """
 import argparse, json, os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -24,7 +24,8 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 import faiss
 from configs.config import CONFIG
 
-os.makedirs("results", exist_ok=True)
+RESULTS = CONFIG["results_dir"]
+os.makedirs(RESULTS, exist_ok=True)
 
 
 def load_rows(path, n):
@@ -139,7 +140,7 @@ def main():
 
     summary = {m: {f"recall@{k}": round(100*float(np.mean(agg[m][k])), 1) for k in ks}
                for m in methods}
-    out = f"results/open_retrieval_{args.dataset}.json"
+    out = f"{RESULTS}/open_retrieval_{args.dataset}.json"
     with open(out, "w") as f:
         json.dump({"n": len(rows), "corpus_size": len(corpus), "summary": summary}, f, indent=2)
 

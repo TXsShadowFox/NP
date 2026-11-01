@@ -17,7 +17,7 @@ Experiments:
   C. Pick the tau that best separates correct vs incorrect answers.
 
 Run:
-    python src/06_ablations_and_sweep.py --dataset hotpotqa --backend local
+    python experiments/06_ablations_and_sweep.py --dataset hotpotqa --backend local
 """
 import argparse, json, os, re, sys, string
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -101,9 +101,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="hotpotqa")
     ap.add_argument("--backend", default="local")
+    ap.add_argument("--runs_dir", default=CONFIG["results_dir"],
+                    help="where to read run outputs from; use logs to replay the paper's committed runs")
     args = ap.parse_args()
+    RUNS, RESULTS = args.runs_dir, CONFIG["results_dir"]   # read from RUNS, always write to RESULTS
+    os.makedirs(RESULTS, exist_ok=True)
 
-    path = f"results/adaptive_{args.dataset}_{args.backend}.jsonl"
+    path = f"{RUNS}/adaptive_{args.dataset}_{args.backend}.jsonl"
     if not os.path.exists(path):
         print(f"[!] missing {path}; run 04_adaptive_loop.py first"); return
     records = [json.loads(l) for l in open(path)]
@@ -155,7 +159,7 @@ def main():
           f"avg_it={best[3]:.2f}, AUROC={best[4]:.3f})")
 
     out = {"n": len(records), "best_tau_by_EM": best[0]}
-    json.dump(out, open(f"results/sweep_{args.dataset}_{args.backend}.json", "w"), indent=2)
+    json.dump(out, open(f"{RESULTS}/sweep_{args.dataset}_{args.backend}.json", "w"), indent=2)
     print(f"saved -> results/sweep_{args.dataset}_{args.backend}.json")
 
 

@@ -15,7 +15,7 @@ It reuses results/adaptive_{dataset}_{backend}.jsonl (from 04) for AB-RAG,
 and runs a static baseline (fixed K, one pass) inline for fair comparison.
 
 Run:
-    python src/05_experiments.py --dataset hotpotqa --n 100 --backend local
+    python experiments/05_experiments.py --dataset hotpotqa --n 100 --backend local
 """
 import argparse, json, os, re, sys, string
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -23,8 +23,8 @@ import numpy as np
 from tqdm import tqdm
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from configs.config import CONFIG
-from src.generation import get_generator
-from src.confidence import (token_probability_confidence, evidence_answer_consistency,
+from experiments.generation import get_generator
+from experiments.confidence import (token_probability_confidence, evidence_answer_consistency,
                             retrieval_score_variance)
 
 # reuse the Retriever from the adaptive module
@@ -85,10 +85,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="hotpotqa")
     ap.add_argument("--n", type=int, default=100)
-    ap.add_argument("--backend", choices=["local", "claude", "ollama"], default="local")
+    ap.add_argument("--backend", choices=["local", "claude", "ollama", "groq", "openrouter"], default="local")
     ap.add_argument("--static_k", type=int, default=10,
                     help="fixed K for the static RAG baseline")
+    ap.add_argument("--runs_dir", default=CONFIG["results_dir"],
+                    help="where to read run outputs from; use logs to replay the paper's committed runs")
     args = ap.parse_args()
+    RUNS, RESULTS = args.runs_dir, CONFIG["results_dir"]   # read from RUNS, always write to RESULTS
+    os.makedirs(RESULTS, exist_ok=True)
 
     rows = load_rows(f"data/{args.dataset}.jsonl", args.n)
     corpus = build_corpus(rows)
@@ -102,21 +106,24 @@ def main():
     retr = Retriever(corpus, embedder, reranker, dev)
 
     # ---- load AB-RAG results from step 04 ----
-    adaptive_path = f"results/adaptive_{args.dataset}_{args.backend}.jsonl"
+    adaptive_path = f"{RUNS}/adaptive_{args.dataset}_{args.backend}.jsonl"
     if not os.path.exists(adaptive_path):
         print(f"[!] missing {adaptive_path}. Run 04_adaptive_loop.py first."); return
     adaptive = {json.loads(l)["qid"]: json.loads(l) for l in open(adaptive_path)}
 
     # ---- CHECKPOINT: cache each static answer as we go, so a crash or
     #      rate-limit never wastes API credit. On restart, skip done qids. ----
-    ckpt_path = f"results/static_cache_{args.dataset}_{args.backend}.jsonl"
+    ckpt_path = f"{RESULTS}/static_cache_{args.dataset}_{args.backend}.jsonl"
     done = {}
-    if os.path.exists(ckpt_path):
-        for l in open(ckpt_path):
-            try:
-                d = json.loads(l); done[d["qid"]] = d
-            except Exception:
-                continue
+    seed_path = f"{RUNS}/static_cache_{args.dataset}_{args.backend}.jsonl"
+    for p in dict.fromkeys([seed_path, ckpt_path]):   # RUNS copy is only read, never appended to
+        if os.path.exists(p):
+            for l in open(p):
+                try:
+                    d = json.loads(l); done[d["qid"]] = d
+                except Exception:
+                    continue
+    if done:
         print(f"[checkpoint] resuming: {len(done)} static answers already cached")
 
     static_rows, abrag_rows = [], []
@@ -177,7 +184,7 @@ def main():
         "static": static_sum, "abrag": abrag_sum,
         "confidence_analysis": conf_analysis,
     }
-    op = f"results/experiment_{args.dataset}_{args.backend}.json"
+    op = f"{RESULTS}/experiment_{args.dataset}_{args.backend}.json"
     json.dump(out, open(op, "w"), indent=2)
 
     print("\n================ HEADLINE RESULTS ================")

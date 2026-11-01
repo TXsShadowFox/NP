@@ -7,9 +7,9 @@ Saves a per-question record so later scripts (adaptive loop, experiments,
 plots) can reuse it without re-running the LLM.
 
 Run (local, free):
-    python src/03_generate_and_confidence.py --dataset hotpotqa --n 100 --backend local
+    python experiments/03_generate_and_confidence.py --dataset hotpotqa --n 100 --backend local
 Run (Claude, needs ANTHROPIC_API_KEY):
-    python src/03_generate_and_confidence.py --dataset hotpotqa --n 100 --backend claude
+    python experiments/03_generate_and_confidence.py --dataset hotpotqa --n 100 --backend claude
 
 Output: results/gen_conf_{dataset}_{backend}.jsonl
 """
@@ -21,11 +21,12 @@ from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer, CrossEncoder
 import faiss
 from configs.config import CONFIG
-from src.confidence import (token_probability_confidence, evidence_answer_consistency,
+from experiments.confidence import (token_probability_confidence, evidence_answer_consistency,
                             retrieval_score_variance)
-from src.generation import get_generator
+from experiments.generation import get_generator
 
-os.makedirs("results", exist_ok=True)
+RESULTS = CONFIG["results_dir"]
+os.makedirs(RESULTS, exist_ok=True)
 
 
 def load_rows(path, n):
@@ -77,7 +78,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="hotpotqa")
     ap.add_argument("--n", type=int, default=100)
-    ap.add_argument("--backend", choices=["local", "claude"], default="local")
+    ap.add_argument("--backend", choices=["local", "claude", "ollama", "groq", "openrouter"], default="local")
     args = ap.parse_args()
 
     rows = load_rows(f"data/{args.dataset}.jsonl", args.n)
@@ -92,7 +93,7 @@ def main():
     reranker = CrossEncoder(CONFIG["reranker_model"], device=dev)
     gen = get_generator(args.backend, CONFIG, device=dev)
 
-    out_path = f"results/gen_conf_{args.dataset}_{args.backend}.jsonl"
+    out_path = f"{RESULTS}/gen_conf_{args.dataset}_{args.backend}.jsonl"
     fout = open(out_path, "w")
 
     for r in tqdm(rows, desc=f"gen+conf ({args.backend})", unit="q"):

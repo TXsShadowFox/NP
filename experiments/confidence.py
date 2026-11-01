@@ -4,7 +4,7 @@ confidence.py
 THE NOVEL CORE of AB-RAG. After the LLM produces an answer, we estimate how
 trustworthy it is using THREE complementary signals, then combine them.
 
-  Conf = alpha * Conf_token + beta * Consistency - gamma * Var(R)
+  Conf = alpha * Conf_token + beta * Consistency + gamma * Var(R)
 
 Signal 1 - Token Probability Confidence
     Mean per-token probability of the generated answer.
@@ -14,12 +14,14 @@ Signal 2 - Evidence-Answer Consistency
     Cosine similarity between the answer embedding and the (mean) evidence
     embedding. High -> answer is grounded in retrieved text.
 
-Signal 3 - Retrieval Score Variance  (a PENALTY)
+Signal 3 - Retrieval Score Variance  (a REWARD)
     Variance of the reranker relevance scores of the evidence set.
-    Low variance -> coherent, agreeing evidence. High -> shaky evidence.
+    High variance -> reranker cleanly separated relevant from irrelevant
+    passages. Originally a penalty; 07_signal_diagnostics showed the sign
+    was backwards (AUROC 0.427 as penalty, 0.573 as reward).
 
 All three are normalized to [0,1] so the weighted sum is interpretable as a
-confidence in [0,1] (after clipping). gamma subtracts the variance penalty.
+confidence in [0,1] (after clipping). gamma adds the variance reward.
 
 This module is pure numpy + an embedder you pass in. No model training.
 """
@@ -55,7 +57,7 @@ def evidence_answer_consistency(answer_text, evidence_texts, embedder):
 
 def retrieval_score_variance(rerank_scores):
     """
-    Variance of evidence relevance scores, normalized to [0,1] as a penalty.
+    Variance of evidence relevance scores, normalized to [0,1] (used as a reward).
     We min-max the scores first so variance is scale-free, then return the
     variance of the normalized scores (already in [0,1] range-ish, clipped).
     """

@@ -21,7 +21,7 @@ Formulations tested:
     - mean_score: mean rerank score (alternative: high mean = confident retrieval)
 
 Run:
-    python src/07_signal_diagnostics.py --dataset hotpotqa --backend claude --n 200
+    python experiments/07_signal_diagnostics.py --dataset hotpotqa --backend claude --n 200
 """
 import argparse, json, os, re, string, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -61,9 +61,13 @@ def main():
     ap.add_argument("--dataset", default="hotpotqa")
     ap.add_argument("--backend", default="claude")
     ap.add_argument("--n", type=int, default=200)
+    ap.add_argument("--runs_dir", default=CONFIG["results_dir"],
+                    help="where to read run outputs from; use logs to replay the paper's committed runs")
     args = ap.parse_args()
+    RUNS, RESULTS = args.runs_dir, CONFIG["results_dir"]   # read from RUNS, always write to RESULTS
+    os.makedirs(RESULTS, exist_ok=True)
 
-    adaptive_path = f"results/adaptive_{args.dataset}_{args.backend}.jsonl"
+    adaptive_path = f"{RUNS}/adaptive_{args.dataset}_{args.backend}.jsonl"
     saved = {json.loads(l)["qid"]: json.loads(l) for l in open(adaptive_path)}
 
     rows = load_rows(f"data/{args.dataset}.jsonl", args.n)
@@ -117,7 +121,7 @@ def main():
         "S3": {"neg_var": auroc(s3_negvar, labels), "pos_var": auroc(s3_posvar, labels),
                "mean_score": auroc(s3_meanscore, labels)},
     }
-    json.dump(out, open(f"results/signal_diag_{args.dataset}_{args.backend}.json", "w"), indent=2)
+    json.dump(out, open(f"{RESULTS}/signal_diag_{args.dataset}_{args.backend}.json", "w"), indent=2)
     print(f"\nsaved -> results/signal_diag_{args.dataset}_{args.backend}.json")
     print("\nInterpretation: any formulation with AUROC > 0.55 is a usable signal.")
     print("If max/top1 S2 or mean-score S3 beats 0.55, we adopt it and all 3 signals contribute.")

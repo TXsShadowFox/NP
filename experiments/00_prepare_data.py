@@ -92,6 +92,7 @@ def prepare_triviaqa(n=600):
             "qid": ex["question_id"],
             "question": ex["question"],
             "answer": ans_value,
+            "aliases": ex["answer"].get("aliases", []),   # accepted answer variants, for EM
             "passages": passages,
             "gold_pids": gold_pids,
         })

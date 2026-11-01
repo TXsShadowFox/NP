@@ -10,7 +10,7 @@ so we build a fresh tiny BM25 + FAISS index per question. This is fast and
 gives an honest retrieval task (find the 2 gold paragraphs among ~10).
 
 Run:
-    python src/01_retrieval.py --dataset hotpotqa --n 500
+    python experiments/01_retrieval.py --dataset hotpotqa --n 500
 """
 import argparse, json, os, sys
 # --- make project root importable no matter where we run from ---
@@ -21,7 +21,8 @@ from sentence_transformers import SentenceTransformer
 import faiss
 from configs.config import CONFIG
 
-os.makedirs("results", exist_ok=True)
+RESULTS = CONFIG["results_dir"]
+os.makedirs(RESULTS, exist_ok=True)
 
 
 def load_data(path, n):
@@ -109,7 +110,7 @@ def main():
         print(f"\n[!] No retrieval-evaluable rows found in data/{args.dataset}.jsonl")
         print("    If you haven't run 00_prepare_data.py yet, or HuggingFace is")
         print("    blocked, test the pipeline first with the bundled sample:")
-        print("        python src/01_retrieval.py --dataset sample --n 5\n")
+        print("        python experiments/01_retrieval.py --dataset sample --n 5\n")
         return
     print(f"loaded {len(rows)} retrieval-evaluable questions from {args.dataset}")
 
@@ -121,7 +122,7 @@ def main():
           + ("  (GPU - fast)" if dev == "cuda" else "  (CPU - slower; this is why it may lag)"))
 
     summary = evaluate(rows, embedder)
-    out_path = f"results/retrieval_{args.dataset}.json"
+    out_path = f"{RESULTS}/retrieval_{args.dataset}.json"
     with open(out_path, "w") as f:
         json.dump({"n": len(rows), "summary": summary}, f, indent=2)
 

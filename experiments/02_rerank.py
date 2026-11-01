@@ -14,7 +14,7 @@ the whole corpus. Fast even on CPU because the pool is tiny.
 Model: cross-encoder/ms-marco-MiniLM-L12-v2  (trained on MS MARCO ranking).
 
 Run:
-    python src/02_rerank.py --dataset hotpotqa --n 200
+    python experiments/02_rerank.py --dataset hotpotqa --n 200
 """
 import argparse, json, os, sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -25,7 +25,8 @@ import faiss
 from rank_bm25 import BM25Okapi
 from configs.config import CONFIG
 
-os.makedirs("results", exist_ok=True)
+RESULTS = CONFIG["results_dir"]
+os.makedirs(RESULTS, exist_ok=True)
 
 
 def load_data(path, n):
@@ -116,7 +117,7 @@ def main():
         "hybrid":          {f"recall@{k}": round(100*float(np.mean(hybrid_recall[k])), 1) for k in ks},
         "hybrid_reranked": {f"recall@{k}": round(100*float(np.mean(rerank_recall[k])), 1) for k in ks},
     }
-    out = f"results/rerank_{args.dataset}.json"
+    out = f"{RESULTS}/rerank_{args.dataset}.json"
     with open(out, "w") as f:
         json.dump({"n": len(rows), "summary": summary}, f, indent=2)
 

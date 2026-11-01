@@ -17,6 +17,8 @@ scikit-learn>=1.3
 # Generation backends
 # local Llama runs via transformers above; for the API path:
 anthropic>=0.30
+openai>=1.40            # Groq / OpenRouter backends (OpenAI-compatible APIs)
+ollama>=0.3            # Llama-3.2-3B backend (generation.py OllamaGenerator)
 
 # Plots + report
 matplotlib>=3.7

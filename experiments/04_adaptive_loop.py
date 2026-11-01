@@ -21,7 +21,7 @@ This runs on the OPEN-RETRIEVAL corpus (pooled passages) because that is the
 only setting where "retrieve more" is meaningful.
 
 Run:
-    python src/04_adaptive_loop.py --dataset hotpotqa --n 100 --backend local
+    python experiments/04_adaptive_loop.py --dataset hotpotqa --n 100 --backend local
 
 Output: results/adaptive_{dataset}_{backend}.jsonl  (one record per question,
         including the full per-iteration trace)
@@ -34,11 +34,12 @@ from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer, CrossEncoder
 import faiss
 from configs.config import CONFIG
-from src.confidence import (token_probability_confidence, evidence_answer_consistency,
+from experiments.confidence import (token_probability_confidence, evidence_answer_consistency,
                             retrieval_score_variance)
-from src.generation import get_generator
+from experiments.generation import get_generator
 
-os.makedirs("results", exist_ok=True)
+RESULTS = CONFIG["results_dir"]
+os.makedirs(RESULTS, exist_ok=True)
 
 
 def load_rows(path, n):
@@ -121,7 +122,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="hotpotqa")
     ap.add_argument("--n", type=int, default=100)
-    ap.add_argument("--backend", choices=["local", "claude", "ollama"], default="local")
+    ap.add_argument("--backend", choices=["local", "claude", "ollama", "groq", "openrouter"], default="local")
     args = ap.parse_args()
 
     rows = load_rows(f"data/{args.dataset}.jsonl", args.n)
@@ -139,7 +140,7 @@ def main():
     retr = Retriever(corpus, embedder, reranker, dev)
 
     tau, T_max, k0, kstep = CONFIG["tau"], CONFIG["T_max"], CONFIG["rerank_topk"], CONFIG["k_step"]
-    out_path = f"results/adaptive_{args.dataset}_{args.backend}.jsonl"
+    out_path = f"{RESULTS}/adaptive_{args.dataset}_{args.backend}.jsonl"
     fout = open(out_path, "w")
 
     for r in tqdm(rows, desc=f"adaptive ({args.backend})", unit="q"):
@@ -178,6 +179,10 @@ def main():
             "final_K": final["K"],
             "stop_reason": final["stop_reason"],
             "trace": trace,
+            # the exact policy settings behind this record, so replays and
+            # the paper's tables can always be checked against what really ran
+            "settings": {k: CONFIG[k] for k in ("alpha", "beta", "gamma", "tau", "T_max",
+                                                "k_step", "rerank_topk", "n_consistency_samples")},
         }
         fout.write(json.dumps(rec) + "\n")
         fout.flush()

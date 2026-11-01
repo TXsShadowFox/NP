@@ -36,3 +36,9 @@ Thumbs.db
 
 # NOTE: data/ and logs/ are intentionally TRACKED in this repo — the prepared
 # datasets and run outputs are what make the paper's numbers verifiable.
+
+# new runs and re-scoring output (the paper's committed runs stay in logs/)
+results/
+
+# build output of paper_followup/ (upload the folder or this zip to Overleaf)
+paper_followup.zip
