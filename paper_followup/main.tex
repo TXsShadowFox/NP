@@ -281,7 +281,7 @@ AB-RAG returns the answer of the round at which it stops. I2 instead returns the
 
 \subsection{Results on the released runs}
 
-Table~\ref{tab:improve} and Figure~\ref{fig:improve} apply I1 and I2 to the released answers. I1 never turned an \EM{}-correct answer wrong (0 of 305 across runs) and fixed 8, 2, 25 and 11 answers. I2 matters only for Llama ($+3.0$), the run that iterates most (1.90 rounds on average). The gains are significant for Qwen and both Claude runs; Llama's is not ($p=0.07$).
+Table~\ref{tab:improve} and Figure~\ref{fig:improve} apply I1 and I2 to the released answers. I1 never turned an \EM{}-correct answer wrong (0 of 305 across runs) and fixed 8, 2, 25 and 11 answers. I2 matters only for Llama ($+3.0$), the run that iterates most (1.90 rounds on average). The gains are significant for Qwen and both Claude runs (paired bootstrap 95\% intervals $[+1.5, +7.0]$, $[+8.0, +17.0]$ and $[+3.5, +10.0]$ points); Llama's is not under McNemar's test ($p=0.07$, interval $[+0.5, +6.0]$).
 
 \begin{table}[t]
 \centering
@@ -405,7 +405,7 @@ Dataset & Pipeline & $K{=}5$ & $K{=}10$ & $K{=}15$ & AB-RAG & Passages & Random 
 \label{fig:ftsweep}
 \end{figure}
 
-\paragraph{N2 and N3 replicate.} Holding $S_2$ and $S_3$ at their run mean flips 3 of 602, 8 of 576 and 3 of 627 executed stop decisions (HotpotQA with the paper's retrieval, with R1, and TriviaQA). Across rounds, $S_2$ and $S_3$ together contribute a standard deviation of 0.008 to 0.010 to the confidence score, against 0.073 to 0.082 from $S_1$, and the first-round AUROC of the confidence score is within 0.01 of that of $S_1$ alone (0.648 vs.\ 0.652 on HotpotQA, 0.770 vs.\ 0.770 on TriviaQA). Answer brevity predicts \EM{}-correctness (AUROC 0.61 on both datasets) but not containment-correctness (0.46 and 0.43), as on the released runs.
+\paragraph{N2 and N3 replicate.} Holding $S_2$ and $S_3$ at their run mean flips 3 of 602, 8 of 576 and 3 of 627 executed stop decisions (HotpotQA with the paper's retrieval, with R1, and TriviaQA). Across rounds, $S_2$ and $S_3$ together contribute a standard deviation of 0.008 to 0.010 to the confidence score, against 0.073 to 0.082 from $S_1$, and the first-round AUROC of the confidence score is within 0.01 of that of $S_1$ alone (0.648 vs.\ 0.652 on HotpotQA, 0.770 vs.\ 0.770 on TriviaQA). Answer brevity predicts \EM{}-correctness (AUROC 0.61 on both datasets) but not containment-correctness (0.46 and 0.43), as on the released Qwen run (0.62 and 0.49); on the released Claude runs brevity also predicts containment-correctness (0.63 and 0.80).
 
 \begin{table}[t]
 \centering
@@ -438,9 +438,9 @@ HotpotQA & R1 + I1, AB-RAG & 50.0 $\to$ 50.4 & $+46/-44$ & 0.92 & [$-$3.4, $+$4.
 \label{tab:ftpaired}
 \end{table}
 
-\paragraph{I1 holds on unseen questions; I2 has nothing to select.} Table~\ref{tab:ftpaired} pairs each change with the base pipeline question by question. I1 raises \EM{} by 4.2 points on HotpotQA and 2.2 on TriviaQA without turning a single \EM{}-correct answer wrong, and the gain holds on questions 201--500, which played no part in revising its instruction ($+4.7$, $p<0.001$, and $+2.4$, $p=0.016$). Containment falls by 1.0 and 0.2 points. I2 changes the \EM{} label of at most two answers per dataset: with 1.2 rounds on average there is rarely an earlier, more confident round to return.
+\paragraph{I1 holds on unseen questions; I2 has nothing to select.} Table~\ref{tab:ftpaired} pairs each change with the base pipeline question by question. I1 raises \EM{} by 4.2 points on HotpotQA and 2.2 on TriviaQA without turning a single \EM{}-correct answer wrong, and the gain holds on questions 201--500, which played no part in revising its instruction ($+4.7$, $p<0.001$, and $+2.4$, $p=0.016$). Containment falls by 1.0 and 0.2 points. I2 changes the \EM{} label of at most two answers per dataset: with 1.2 rounds on average there is rarely an earlier, more confident round to return. With I1 and I2 together AB-RAG scores 42.0 and 49.8 \EM{}, against 42.2 and 50.0 with I1 alone.
 
-\paragraph{R1 helps static retrieval but not AB-RAG.} The stronger reranker raises static $K=10$ \EM{} on HotpotQA from 36.2 to 40.6 ($p=0.009$; $+4.3$ on questions 201--500, $p=0.053$) and containment by 2.6 points ($p=0.17$). AB-RAG gains only 0.8 points ($p=0.72$): R1 raises first-round \EM{} by 2.0 points, but the few questions AB-RAG sends to further rounds then lose more answers than they gain ($-1.2$ points against stopping after the first round). With R1 and I1 together, AB-RAG reaches 44.2 \EM{} ($+6.2$ over the base pipeline, $p<0.001$; $+6.0$ on questions 201--500, $p=0.013$), and static $K=10$ with the same two changes reaches 44.8 ($+8.6$ over static $K=10$ with the paper's retrieval). Neither combination raises containment significantly, so most of the \EM{} gain is again answer format, with a smaller part from retrieval.
+\paragraph{R1 helps static retrieval but not AB-RAG.} The stronger reranker raises static $K=10$ \EM{} on HotpotQA from 36.2 to 40.6 ($p=0.009$; $+4.3$ on questions 201--500, $p=0.053$) and containment by 2.6 points ($p=0.17$). AB-RAG gains only 0.8 points ($p=0.72$): R1 raises first-round \EM{} by 2.0 points, but the few questions AB-RAG sends to further rounds then lose more answers than they gain ($-1.2$ points against stopping after the first round). With R1 and I1 together, AB-RAG reaches 44.2 \EM{} ($+6.2$ over the base pipeline, $p<0.001$; $+6.0$ on questions 201--500, $p=0.013$), and static $K=10$ with the same two changes reaches 44.8 ($+8.6$ over static $K=10$ with the paper's retrieval). On top of I1, R1 alone still adds 4.2 points to static $K=10$ ($40.6 \to 44.8$, $+46/-25$, $p=0.017$; $+4.3$ on questions 201--500, $p=0.072$). Neither combination raises containment significantly, so most of the \EM{} gain is again answer format, with a smaller part from retrieval.
 
 \section{Discussion}
 

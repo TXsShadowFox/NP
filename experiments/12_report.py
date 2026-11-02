@@ -817,8 +817,8 @@ def improvements_section(IMP, FT, figs):
               + "; ".join(f"{lab} {fmt_p(p)}" for lab, p in t["paired_vs_static_same_stage"].items()) +
               ". With the format fixed on both sides, AB-RAG's lead over static RAG is no longer significant.", "",
               "Confidence AUROC under EM, paper → + I1: " +
-              "; ".join(f"{A['runs'][f'{ds}_{be}']['label']} {A['runs'][f'{ds}_{be}']['conf_auroc_EM']['paper AB-RAG']} → "
-                        f"{A['runs'][f'{ds}_{be}']['conf_auroc_EM']['AB-RAG + I1 short answer']}" for ds, be, _ in RUNS) +
+              "; ".join(f"{A['runs'][f'{ds}_{be}']['label']} {A['runs'][f'{ds}_{be}']['conf_auroc_EM']['paper AB-RAG']:.3f} → "
+                        f"{A['runs'][f'{ds}_{be}']['conf_auroc_EM']['AB-RAG + I1 short answer']:.3f}" for ds, be, _ in RUNS) +
               ". It falls for Llama and both Claude runs: part of the paper's AUROC came from long answers being both "
               "low-confidence and EM-wrong (N3).", ""]
         if figs.get("answers"):
@@ -867,7 +867,9 @@ def md_table(head, rows):
 
 
 def fmt_p(d):
-    return f"+{d['plus']}/−{d['minus']}, p={d['mcnemar_p']}, CI [{d['ci95_pts'][0]:+}, {d['ci95_pts'][1]:+}]"
+    p = d["mcnemar_p"]
+    return (f"+{d['plus']}/−{d['minus']}, p{'' if p < 0.001 else '='}{fmt_pval(p)}, "
+            f"CI [{d['ci95_pts'][0]:+}, {d['ci95_pts'][1]:+}]")
 
 
 def write_report(R, ret, FT, IMP, figs):
@@ -877,7 +879,7 @@ def write_report(R, ret, FT, IMP, figs):
          "N1 (value-of-retrieval stopping) is set aside and not reported.", "",
          "**Scope.** The paper's runs were re-scored, not re-generated: same answers, corrected evaluation. "
          "Results that need answers at every round for every question (the random budget-matched control, "
-         "the tau sweep above 0.6) come from the new full traces and appear in the last section once they exist.", ""]
+         "the tau sweep above 0.6) come from the new full traces (end of section 9, and section 10).", ""]
 
     L += ["## 1. Static RAG vs AB-RAG (paper Table `tab:static`)", "",
           "Under EM the paper's numbers match its saved answers in `logs/` exactly (re-scored, not re-generated: the models were not re-run). The other two labels use the same answers.", ""]
@@ -887,8 +889,8 @@ def write_report(R, ret, FT, IMP, figs):
         P, S = PAPER_STATIC[k], R[k]["static"]
         sv = lambda lab: f"{S[lab].get('static_K10', '–')} / {S[lab]['abrag']}"
         rows.append([name, f"{P[0]} / {P[1]}", sv("EM"), sv("EM+alias"), sv("contains"),
-                     f"{P[3]} / {S['EM']['abrag_f1']}", f"{P[4]} / {R[k]['avg_iters']}",
-                     f"{P[5]} / {S['EM']['conf_auroc']}"])
+                     f"{P[3]} / {S['EM']['abrag_f1']}", f"{P[4]:.2f} / {R[k]['avg_iters']:.2f}",
+                     f"{P[5]:.3f} / {S['EM']['conf_auroc']:.3f}"])
     L += [md_table(["Backbone / dataset", "Paper EM static / AB-RAG", "Ours EM", "Ours EM+alias",
                     "Ours contains", "AB-RAG F1 paper / ours", "Avg iter paper / ours", "AUROC paper / ours"], rows), ""]
     t = R["triviaqa_claude"]["static"]
@@ -930,9 +932,9 @@ def write_report(R, ret, FT, IMP, figs):
     for ds, be, name in RUNS:
         k = f"{ds}_{be}"
         a = R[k]["signal_auroc"]
-        rows.append([name, " / ".join(str(v) for v in PAPER_AUROC[k])] +
-                    [" / ".join(str(a[lab][s]) for s in ("S1", "S2", "S3")) for lab in LABELS] +
-                    [f"{a['EM']['brevity']} / {a['contains']['brevity']}"])
+        rows.append([name, " / ".join(f"{v:.3f}" for v in PAPER_AUROC[k])] +
+                    [" / ".join(f"{a[lab][s]:.3f}" for s in ("S1", "S2", "S3")) for lab in LABELS] +
+                    [f"{a['EM']['brevity']:.3f} / {a['contains']['brevity']:.3f}"])
     L += [md_table(["Backbone / dataset", "Paper S1/S2/S3"] + [f"Ours {lab} S1/S2/S3" for lab in LABELS] +
                    ["Brevity EM / contains"], rows), "",
           "Two S3 entries in the paper are not the signal the loop used. Qwen's 0.429 is 1 − 0.571, i.e. variance "
@@ -977,7 +979,7 @@ def write_report(R, ret, FT, IMP, figs):
                     "Decisions changed when S2, S3 are held at their mean (real weights)",
                     "Same, paper weights vs S1-only rule (as 08)", "SD of conf from S2+S3 / from S1"],
                    [r[:4] + [f"{R[f'{ds}_{be}']['n2']['decision_changes_paper_weights_vs_s1_only']}/{R[f'{ds}_{be}']['n2']['rounds']}",
-                             f"{R[f'{ds}_{be}']['n2']['sd_s2s3_contribution']} / {R[f'{ds}_{be}']['n2']['sd_s1_contribution']}"]
+                             f"{R[f'{ds}_{be}']['n2']['sd_s2s3_contribution']:.3f} / {R[f'{ds}_{be}']['n2']['sd_s1_contribution']:.3f}"]
                     for r, (ds, be, _) in zip(rows, RUNS)]), "",
           "Two of the four runs (Qwen and Claude on HotpotQA) were produced with weights 0.5 / 0.4 / −0.1, "
           "not the 0.7 / 0.05 / 0.25 the paper reports; the fit reproduces every stored confidence to 1e-4.", "",
@@ -988,7 +990,7 @@ def write_report(R, ret, FT, IMP, figs):
     for ds, be, n in RUNS:
         v = R[f"{ds}_{be}"]["n3"]
         rows.append([n, f"{v['em_wrong_but_contains_gold']}/{v['n']}", f"{v['mean_words_em_correct']} / {v['mean_words_em_wrong']}"] +
-                    [f"{v['auroc_conf_final'][lab]} / {v['auroc_brevity_final'][lab]}" for lab in LABELS])
+                    [f"{v['auroc_conf_final'][lab]:.3f} / {v['auroc_brevity_final'][lab]:.3f}" for lab in LABELS])
     L += [md_table(["Run", "EM-wrong answers that contain the gold", "Words: EM-right / EM-wrong"] +
                    [f"AUROC conf / brevity, {lab}" for lab in LABELS], rows), ""]
     ex = R["hotpotqa_claude"]["n3"]["paper_examples"] + R["triviaqa_claude"]["n3"]["paper_examples"]
