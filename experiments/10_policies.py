@@ -19,6 +19,8 @@ AB-RAG stopping at round 2 costs 5 + 10 = 15, static K=10 costs 10.
 Every policy is scored under three correctness labels (EM, EM+alias,
 contains; see metrics.py), with paired tests against static K=10 and a gain
 decomposition: static K=10 -> first round (K=5) -> AB-RAG -> + max-conf.
+Also N2 (S2 and S3 held at their run mean, as for the released runs) and a
+tau sweep (0.30-0.95) with the random control's 95% band at every tau.
 
 Run:
     python experiments/10_policies.py --dataset hotpotqa --backend local --split dev
@@ -98,8 +100,24 @@ def main():
     a, b, g = CONFIG["alpha"], CONFIG["beta"], CONFIG["gamma"]
     steps = [rd for r in recs for rd in r["rounds"]]
     out["s2s3_decision_changes"] = sum(1 for rd in steps if (rd["conf"] >= tau) != (a * rd["c_tok"] >= tau))
+    # N2 as 12_report.py measures it on the released runs: hold S2 and S3 at their run mean and count
+    # flipped stop decisions, over the rounds AB-RAG executes (the paper's count) and over all rounds
+    X = np.array([[[rd["c_tok"], rd["c_con"], rd["v_ret"]] for rd in r["rounds"]] for r in recs])
+    flat = np.clip(a * X[..., 0] + b * X[..., 1].mean() + g * X[..., 2].mean(), 0, 1)
+    flip = (conf >= tau) != (flat >= tau)
+    executed = np.arange(len(Ks))[None, :] <= stop_rounds(conf, tau)[:, None]
+    s2s3 = b * (X[..., 1] - X[..., 1].mean()) + g * (X[..., 2] - X[..., 2].mean())
+    out["n2_held_at_mean"] = {"executed_rounds": int(executed.sum()), "flips_executed": int((flip & executed).sum()),
+                              "all_rounds": int(flip.size), "flips_all": int(flip.sum()),
+                              "sd_s2s3_contribution": round(float(s2s3.std()), 3),
+                              "sd_s1_contribution": round(float((a * X[..., 0]).std()), 3),
+                              "round1_stop_rate": round(float((conf[:, 0] >= tau).mean()), 3)}
     print(f"{args.dataset} / {args.backend} / {args.split}: n={len(recs)}, rounds K={Ks}, tau={tau}")
     print(f"S2+S3 changed the stop decision in {out['s2s3_decision_changes']}/{len(steps)} rounds")
+    n2 = out["n2_held_at_mean"]
+    print(f"N2, S2+S3 held at their mean: {n2['flips_executed']}/{n2['executed_rounds']} executed rounds flip "
+          f"({n2['flips_all']}/{n2['all_rounds']} of all rounds); round-1 stop rate {n2['round1_stop_rate']}")
+    sweep_rng = np.random.default_rng(CONFIG["seed"] + 1)   # own stream: keeps the tau-level control unchanged
 
     for name, fn in LABELS.items():
         C = np.array([[fn(rd["answer"], r) for rd in r["rounds"]] for r in recs], dtype=float)
@@ -129,10 +147,16 @@ def main():
                                  "S1": round(auroc([r["rounds"][0]["c_tok"] for r in recs], C[:, 0]), 3),
                                  "brevity": round(auroc(brevity, C[:, 0]), 3)}   # N3
         block["tau_sweep"] = []
+        rows = np.arange(len(recs))
         for t_ in TAUS:
             st = stop_rounds(conf, t_)
+            rnd = np.array([C[rows, sweep_rng.permutation(st)].mean() for _ in range(1000)])
             block["tau_sweep"].append({"tau": t_, "avg_rounds": round(float(st.mean() + 1), 2),
-                                       "acc": pct(C[np.arange(len(recs)), st])})
+                                       "passages_read": round(float(np.cumsum(Ks)[st].mean()), 2),
+                                       "acc": pct(C[rows, st]), "acc_max_conf": pct(C[rows, np.where(
+                                           np.arange(len(Ks))[None, :] <= st[:, None], conf, -1.0).argmax(axis=1)]),
+                                       "random_acc": pct(rnd),
+                                       "random_95": [round(100 * float(np.percentile(rnd, q)), 1) for q in (2.5, 97.5)]})
         out[name] = block
 
         print(f"\n--- label: {name} ---")

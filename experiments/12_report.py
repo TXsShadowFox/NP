@@ -530,12 +530,19 @@ def fig_protocol():
 
 
 def fig_random_control(FT):
-    if not FT:
+    grid = fulltrace_grid(FT)
+    if not grid:
         return None
-    keys = list(FT)
-    fig, axes = plt.subplots(1, len(keys), figsize=(4.2 * len(keys), 3.2), squeeze=False)
-    for ax, k in zip(axes[0], keys):
-        d = FT[k]
+    variants = ["as generated", "+ I1"]
+    fig, axes = plt.subplots(2, len(grid), figsize=(4.2 * len(grid), 5.6), squeeze=False)
+    for j, (col, dd) in enumerate(grid.items()):
+        for i, v in enumerate(variants):
+            if v not in dd:
+                axes[i][j].axis("off")
+    for (j, (col, dd)), (i, v) in ((c, r) for c in enumerate(grid.items()) for r in enumerate(variants)):
+        if v not in dd:
+            continue
+        ax, d = axes[i][j], dd[v]
         for i, lab in enumerate(LABELS):
             pol = d[lab]["policies"]
             r = pol["random (budget-matched)"]
@@ -546,10 +553,65 @@ def fig_random_control(FT):
         ax.set_yticks(range(len(LABELS)), list(LABELS))
         ax.invert_yaxis()
         ax.set_xlabel("accuracy (%)")
-        ax.set_title(f"{k} (n={d['n']})")
-    axes[0][0].legend(fontsize=7.5)
-    fig.tight_layout()
+        ax.set_title(f"{d['dataset']}, {variant_name(d['backend']).split(', ', 1)[1]} (n={d['n']})", fontsize=9.5)
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, bbox_to_anchor=(0.5, -0.03), fontsize=8)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
     return save(fig, "fig_j_random_budget_control.png")
+
+
+def fulltrace_grid(FT):
+    """Test-split replays as {(dataset, retrieval): {"as generated" | "+ I1": policies dict}}."""
+    grid = {}
+    for d in FT.values():
+        if d["split"] == "test":
+            col = (d["dataset"], "R1 retrieval" if "-r1" in d["backend"] else "paper retrieval")
+            grid.setdefault(col, {})["+ I1" if d["backend"].endswith("-i1") else "as generated"] = d
+    return dict(sorted(grid.items(), key=lambda kv: (kv[0][0], kv[0][1] != "paper retrieval")))
+
+
+def fig_fulltrace_sweep(FT):
+    """EM vs passages read: AB-RAG at every tau, the random control's 95% band at the same budget,
+    and static K. One column per (dataset, retrieval), one row without and one with I1."""
+    grid = fulltrace_grid(FT)
+    if not grid:
+        return None
+    variants = ["as generated", "+ I1"]
+    fig, axes = plt.subplots(2, len(grid), figsize=(3.7 * len(grid), 6.0), squeeze=False, sharex=True)
+    for j, ((ds, retr), dd) in enumerate(grid.items()):
+        for i, v in enumerate(variants):
+            ax = axes[i][j]
+            if v not in dd:
+                ax.axis("off")
+                continue
+            d = dd[v]
+            sw = d["EM"]["tau_sweep"]
+            x = [s["passages_read"] for s in sw]
+            ax.fill_between(x, [s["random_95"][0] for s in sw], [s["random_95"][1] for s in sw], color=GRID,
+                            lw=0, zorder=1, label="random stopping, same budget (95%)")
+            ax.plot(x, [s["acc"] for s in sw], "-o", color=SERIES[0], ms=4, lw=2, zorder=3, label="AB-RAG, tau 0.30–0.95")
+            at = next(s for s in sw if abs(s["tau"] - TAU) < 1e-9)
+            ax.plot(at["passages_read"], at["acc"], "o", ms=8, mfc=SURFACE, mec=SERIES[0], mew=2, zorder=4)
+            ax.annotate(f"tau={TAU}", (at["passages_read"], at["acc"]), xytext=(6, 6), textcoords="offset points",
+                        fontsize=7.5, color=INK2)
+            pol = d["EM"]["policies"]
+            ks = d["Ks"]
+            ax.plot(ks, [pol[f"static K={k}"]["acc"] for k in ks], "s", color=SERIES[1], ms=6, zorder=3,
+                    label="static K = 5, 10, 15")
+            ax.set_xscale("log")
+            ax.minorticks_off()
+            ax.set_xticks([5, 10, 15, 30], ["5", "10", "15", "30"])
+            lo = min(min(s["random_95"][0] for s in sw), min(s["acc"] for s in sw))
+            ax.set_ylim(lo - 1.5, lo + 6.5)
+            ax.set_title(f"{ds}, {retr}{', + I1' if v == '+ I1' else ''}", fontsize=9.5)
+            if j == 0:
+                ax.set_ylabel("EM (%)")
+            if i == 1:
+                ax.set_xlabel("passages read per question")
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, bbox_to_anchor=(0.5, -0.03), fontsize=8)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    return save(fig, "fig_m_fulltrace_tau_sweep.png")
 
 
 # ---------------------------------------------------------------- report
@@ -610,7 +672,7 @@ def variant_name(backend):
     return f"{base}, {'R1' if '-r1' in backend else 'paper'} retrieval" + (" + I1" if backend.endswith("-i1") else "")
 
 
-def fulltrace_variants(FT):
+def fulltrace_variants(FT, figs):
     """Test-split replays of every traces variant: paper vs R1 retrieval, with and without I1."""
     test = sorted((d for d in FT.values() if d["split"] == "test"),
                   key=lambda d: (d["dataset"], "-r1" in d["backend"], d["backend"].endswith("-i1"), d["backend"]))
@@ -631,7 +693,10 @@ def fulltrace_variants(FT):
                          pol["oracle (any round)"]["acc"]])
         L += [f"{lab}:", "", md_table(["Dataset", "Variant", "n", "Static K=10", "AB-RAG", "AB-RAG + I2",
                                        "Random, same budget [95%]", "P(random ≥ AB-RAG)", "Oracle"], rows), ""]
-    return L + fulltrace_paired(test)
+    if figs.get("ft_sweep"):
+        L += ["Every threshold, not only tau = 0.6: EM against passages read, with the random control's 95% band "
+              "at each tau's budget.", "", f"![full-trace tau sweep]({figs['ft_sweep']})", ""]
+    return L + fulltrace_n2(test) + fulltrace_paired(test)
 
 
 def paper_qids(ds):
@@ -639,50 +704,88 @@ def paper_qids(ds):
     return {json.loads(l)["qid"] for p in glob.glob(f"logs/adaptive_{ds}_*.jsonl") for l in open(p, encoding="utf-8")}
 
 
+def fmt_pval(p):
+    return "<0.001" if p < 0.001 else f"{p:.3f}"
+
+
+def paired_cells(ref, new, seen):
+    """ref, new: {qid: "0"/"1"}. Paired stats on all common questions, and Δ on those not in `seen`."""
+    out = []
+    for keep in (lambda q: True, lambda q: q not in seen):
+        q = [k for k in new if k in ref and keep(k)]
+        if not q:
+            out.append(None)
+            continue
+        a, b = [ref[k] == "1" for k in q], [new[k] == "1" for k in q]
+        plus, minus, p = mcnemar(a, b)
+        out.append((len(q), pct(a), pct(b), plus, minus, p, paired_bootstrap(a, b)))
+    (n, acc_a, acc_b, plus, minus, p, (lo, hi)), clean = out
+    return [n, acc_a, acc_b, f"+{plus}/−{minus}", fmt_pval(p), f"[{lo:+.1f}, {hi:+.1f}]",
+            f"{clean[2] - clean[1]:+.1f} (+{clean[3]}/−{clean[4]}, p{'' if clean[5] < 0.001 else '='}"
+            f"{fmt_pval(clean[5])}, n={clean[0]})"
+            if clean else "none yet"]
+
+
 def fulltrace_paired(test):
     """Every improved pipeline vs the base traces' AB-RAG, paired by question, on all test questions
-    and on questions 201-500 alone (outside the paper's runs, so never seen while designing I1)."""
+    and on questions 201-500 alone (outside the paper's runs, so never seen while designing I1).
+    Then R1 for static retrieval: static K=10 with R1 vs with the paper's retrieval."""
     out = []
+    head = ["n", "Base", "This pipeline", "+/− questions", "McNemar p", "95% CI (pts)", "Questions 201–500 only: Δ pts"]
     for lab in ("EM", "contains"):
-        rows = []
+        rows, static_rows = [], []
         for d in test:
             base = next((b for b in test if b["dataset"] == d["dataset"]
                          and b["backend"] == d["backend"].replace("-r1", "").replace("-i1", "")), None)
             if base is None or "qids" not in d or "qids" not in base:
                 continue
-            ref = dict(zip(base["qids"], base[lab]["per_question"]["AB-RAG"]))
             seen = paper_qids(d["dataset"])
+            ref = dict(zip(base["qids"], base[lab]["per_question"]["AB-RAG"]))
             for pol in ("AB-RAG", "AB-RAG + max-conf"):
                 if d is base and pol == "AB-RAG":
                     continue
                 new = dict(zip(d["qids"], d[lab]["per_question"][pol]))
-                cells = []
-                for keep in (lambda q: True, lambda q: q not in seen):
-                    q = [k for k in new if k in ref and keep(k)]
-                    if not q:
-                        cells.append((0, 0, 0, 0, 0, 1.0, (0.0, 0.0)))
-                        continue
-                    a, b = [ref[k] == "1" for k in q], [new[k] == "1" for k in q]
-                    plus, minus, p = mcnemar(a, b)
-                    cells.append((len(q), pct(a), pct(b), plus, minus, p, paired_bootstrap(a, b)))
-                (n, acc_a, acc_b, plus, minus, p, (lo, hi)), (n2, a2, b2, plus2, minus2, p2, _) = cells
-                rows.append([d["dataset"], variant_name(d["backend"]) + (" + I2" if pol != "AB-RAG" else ""), n,
-                             acc_a, acc_b, f"+{plus}/−{minus}", round(p, 4), f"[{lo:+.1f}, {hi:+.1f}]",
-                             f"{b2 - a2:+.1f} (+{plus2}/−{minus2}, p={round(p2, 4)}, n={n2})" if n2 else "none yet"])
+                rows.append([d["dataset"], variant_name(d["backend"]) + (" + I2" if pol != "AB-RAG" else "")]
+                            + paired_cells(ref, new, seen))
+            if "-r1" in d["backend"]:
+                same = next((b for b in test if b["dataset"] == d["dataset"]
+                             and b["backend"] == d["backend"].replace("-r1", "")), None)
+                if same is not None:
+                    st = lambda x: dict(zip(x["qids"], x[lab]["per_question"]["static K=10"]))
+                    static_rows.append([d["dataset"], "static K=10" + (" + I1" if d["backend"].endswith("-i1") else "")]
+                                       + paired_cells(st(same), st(d), seen))
         if rows:
             out += [f"{lab}, paired against the base pipeline's AB-RAG on the same questions:", "",
-                    md_table(["Dataset", "Pipeline", "n", "Base AB-RAG", "This pipeline", "+/− questions",
-                              "McNemar p", "95% CI (pts)", "Questions 201–500 only: Δ pts"], rows), ""]
+                    md_table(["Dataset", "Pipeline"] + head, rows), ""]
+        if static_rows:
+            out += [f"{lab}, R1 for static retrieval (Base = the paper's retrieval, same answer stage):", "",
+                    md_table(["Dataset", "Policy"] + head, static_rows), ""]
     if out:
         out = ["Questions 201–500 are outside the paper's runs, so I1's instruction (revised once on the paper's "
                "200) has never seen them; R1 was chosen on dev questions only.", ""] + out
     return out
 
 
+def fulltrace_n2(test):
+    """N2 on the full traces: stop decisions that flip when S2 and S3 are held at their run mean."""
+    rows = []
+    for d in test:
+        n2 = d.get("n2_held_at_mean")
+        if n2 and not d["backend"].endswith("-i1"):      # I1 leaves every signal unchanged
+            rows.append([d["dataset"], variant_name(d["backend"]).split(", ", 1)[1],
+                         f"{n2['flips_executed']}/{n2['executed_rounds']}", f"{n2['flips_all']}/{n2['all_rounds']}",
+                         f"{n2['sd_s2s3_contribution']} / {n2['sd_s1_contribution']}", n2["round1_stop_rate"]])
+    if not rows:
+        return []
+    return ["**N2 on the full traces** (paper weights; S2 and S3 held at their run mean):", "",
+            md_table(["Dataset", "Retrieval", "Flips, executed rounds", "Flips, all rounds",
+                      "SD of conf. from S2+S3 / from S1", "Stops after round 1"], rows), ""]
+
+
 def improvements_section(IMP, FT, figs):
     L = ["## 10. Improvements over the paper (I1, I2, R1)", ""]
     if "answers" not in IMP and "retrieval" not in IMP:
-        return L + ["**Pending.** Run `13_answer_extract.py` and `14_retrieval_upgrade.py`.", ""] + fulltrace_variants(FT)
+        return L + ["**Pending.** Run `13_answer_extract.py` and `14_retrieval_upgrade.py`.", ""] + fulltrace_variants(FT, figs)
     if "answers" in IMP:
         A = IMP["answers"]
         L += ["**I1, short-answer stage** and **I2, best-round answer** (`13_answer_extract.py`) are applied to the "
@@ -754,7 +857,7 @@ def improvements_section(IMP, FT, figs):
         L += [md_table(["Dataset", "Retrieval", "Recall @5 / 10 / 15 / 20 / 50, paper setting"], rows), ""]
         if figs.get("retrieval_upgrade"):
             L += [f"![retrieval upgrade]({figs['retrieval_upgrade']})", ""]
-    return L + fulltrace_variants(FT)
+    return L + fulltrace_variants(FT, figs)
 
 
 def md_table(head, rows):
@@ -923,8 +1026,9 @@ def write_report(R, ret, FT, IMP, figs):
     L += improvements_section(IMP, FT, figs)
 
     L += ["## 11. Cost", "", "The paper's Claude Haiku runs cost about $4.10 in API credit (its Table `tab:cost`). "
-          "Everything in this report is re-scoring of saved outputs or local models (free); new traces use free "
-          "Colab or Kaggle GPUs, so the follow-up so far has cost $0.", ""]
+          "Everything in this report is re-scoring of saved outputs or local models; no API credit was spent. "
+          "The full traces (three 500-question runs plus I1) took about 20 minutes on three H100 GPUs of a university "
+          "cluster; the notebook in `notebooks/` reproduces them on a free Colab T4 in several hours.", ""]
 
     L += ["## 12. Figures", "", "**In the paper** (`paper/figures.zip`, extracted to `paper_figures/`):", ""]
     L += [md_table(["Figure", "Shows", "Status here"],
@@ -932,7 +1036,7 @@ def write_report(R, ret, FT, IMP, figs):
                      v, s] for (k, v), s in zip(PAPER_FIGS.items(),
                        ["unchanged", "updated as fig_h (what changed)", "unchanged; N2 adds fig_e",
                         "checked against logs in section 6", "re-measured in fig_g", "redone under 3 labels in fig_a",
-                        "redone under 2 labels in fig_b", "checked in fig_c; full sweep needs traces",
+                        "redone under 2 labels in fig_b", "checked in fig_c; full sweep with random band in fig_m",
                         "redone with brevity in fig_d"])]), ""]
     L += ["**New** (`figures/`): " + ", ".join(f"`{os.path.basename(p)}`" for p in figs.values() if p) + ".", ""]
     open(os.path.join(OUT, "REPORT.md"), "w", encoding="utf-8").write("\n".join(L))
@@ -962,7 +1066,7 @@ def main():
     figs = {"labels": fig_labels(R), "confsep": fig_confsep(R), "sweep": fig_sweep(R), "auroc": fig_auroc(R),
             "n2": fig_n2(R), "n4": fig_n4(R), "recall": fig_recall(ret), "pipeline": fig_pipeline(),
             "protocol": fig_protocol(), "random": fig_random_control(FT),
-            "answers": fig_answer_improvements(IMP), "retrieval_upgrade": fig_retrieval_upgrade(IMP)}
+            "answers": fig_answer_improvements(IMP), "retrieval_upgrade": fig_retrieval_upgrade(IMP), "ft_sweep": fig_fulltrace_sweep(FT)}
     json.dump({"runs": R, "retrieval": ret, "full_trace_replays": list(FT), "improvements": IMP},
               open(os.path.join(OUT, "report.json"), "w"), indent=1, default=str)
     write_report(R, ret, FT, IMP, figs)

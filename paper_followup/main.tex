@@ -1,11 +1,10 @@
 % Follow-up paper draft. Compile with pdflatex + bibtex (or upload the folder to Overleaf).
 % Every number comes from results/report/report.json and results/improved_answers.json
 % (rebuilt by experiments/12_report.py and 13_answer_extract.py).
-% Red [PENDING: ...] marks results that need runs that have not happened yet:
-%   - full traces, random control  -> notebooks/colab_phase1.ipynb, then 10_policies.py
-%   - frozen I1/I2 on the new 500-question test split, end-to-end QA with R1 (HotpotQA)
-% Before submission: move to the venue's template, fill or cut every PENDING item,
-% check every reference, and decide authorship.
+% Full-trace numbers (Section 6) come from results/policies_*_test.json (10_policies.py on the
+% traces from 09_full_traces.py; three 500-question runs plus I1 on 3x H100, about 20 minutes).
+% No PENDING items remain; \pending{} is kept for later notes.
+% Before submission: move to the venue's template, check every reference, and decide authorship.
 \documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage[T1]{fontenc}
@@ -30,7 +29,7 @@
 \maketitle
 
 \begin{abstract}
-Adaptive retrieval-augmented generation decides, question by question, how much evidence to retrieve, and is usually judged by exact match (\EM{}). We re-examine AB-RAG, which retrieves in rounds and stops once a weighted sum of three confidence signals passes a threshold, using its released code and per-question logs. The paper's main accuracy tables reproduce exactly from the logs, and its open-retrieval recall reproduces from scratch; its threshold sweep and two signal AUROC values do not. Re-scoring the same answers with alias-aware and containment-based correctness shows that (i)~the reported $+4.5$ \EM{} gain over static retrieval on TriviaQA is significant under \EM{} ($p=0.004$) but disappears when correctness does not depend on answer wording (80.5\% vs.\ 81.0\%, $p=1.0$); (ii)~two of the three confidence signals change no stopping decision in three of the four runs; (iii)~for Claude, answer length alone predicts \EM{}-correctness better than the confidence score (AUROC 0.83 and 0.90 vs.\ 0.68 and 0.73); and (iv)~two thirds of the TriviaQA gain comes from starting with five passages instead of ten rather than from iterating. Two post-hoc steps, a copy-only answer extractor that never sees the reference answer and best-round answer selection, raise \EM{} on all four released runs by 3.0 to 12.5 points without adding answers that contain the reference. When static retrieval receives the same extraction step, AB-RAG's advantage on TriviaQA is no longer significant ($p=0.15$). We release code for all analyses and a full-trace protocol with a budget-matched random-stopping control.
+Adaptive retrieval-augmented generation decides, question by question, how much evidence to retrieve, and is usually judged by exact match (\EM{}). We re-examine AB-RAG, which retrieves in rounds and stops once a weighted sum of three confidence signals passes a threshold, using its released code and per-question logs. The paper's main accuracy tables reproduce exactly from the logs, and its open-retrieval recall reproduces from scratch; its threshold sweep and two signal AUROC values do not. Re-scoring the same answers with alias-aware and containment-based correctness shows that (i)~the reported $+4.5$ \EM{} gain over static retrieval on TriviaQA is significant under \EM{} ($p=0.004$) but disappears when correctness does not depend on answer wording (80.5\% vs.\ 81.0\%, $p=1.0$); (ii)~two of the three confidence signals change no stopping decision in three of the four runs; (iii)~for Claude, answer length alone predicts \EM{}-correctness better than the confidence score (AUROC 0.83 and 0.90 vs.\ 0.68 and 0.73); and (iv)~two thirds of the TriviaQA gain comes from starting with five passages instead of ten rather than from iterating. Two post-hoc steps, a copy-only answer extractor that never sees the reference answer and best-round answer selection, raise \EM{} on all four released runs by 3.0 to 12.5 points without adding answers that contain the reference. When static retrieval receives the same extraction step, AB-RAG's advantage on TriviaQA is no longer significant ($p=0.15$). Finally, we regenerate the paper's open-model configuration on 500 new questions per dataset and record every round, so that any stopping rule can be compared on identical answers. AB-RAG's confidence-based stopping is then no more accurate than stopping at random with the same retrieval budget: at every threshold it stays within 0.6 points of the random control's 95\% interval. It stops after the first round for 85 to 91\% of questions and so behaves almost like static retrieval with five passages. The extractor's gain holds on questions never used to design it ($+4.7$ and $+2.4$ \EM{}, with no correct answer made wrong), and a stronger reranker raises static-retrieval \EM{} on HotpotQA by 4.4 points but AB-RAG's by only 0.8. We release code for all analyses and the full-trace protocol with its budget-matched random-stopping control.
 \end{abstract}
 
 \section{Introduction}
@@ -47,8 +46,50 @@ We study this question on AB-RAG \citep{kamthan2026abrag}. AB-RAG starts from fi
 \item \textbf{Inert signals.} Holding two of the three signals at their run mean changes no stopping decision in three of four runs (Section~\ref{sec:signals}).
 \item \textbf{Gain decomposition.} Most of the TriviaQA gain comes from the smaller first-round evidence set, not from iterating (Section~\ref{sec:decomp}).
 \item \textbf{Improvements.} A copy-only answer extractor (I1) and best-round selection (I2) raise \EM{} on every released run; a stronger reranker (R1) raises HotpotQA recall@5 from 86.6 to 92.9, while no tested reranker improves TriviaQA (Section~\ref{sec:improve}).
-\item \textbf{Protocol.} A full-trace design that answers every question at every round, so that any stopping rule, including a budget-matched random control, is compared on identical answers (Section~\ref{sec:fulltrace}).
+\item \textbf{Protocol and new runs.} A full-trace design that answers every question at every round, so that any stopping rule, including a budget-matched random control, is compared on identical answers. On 500 new questions per dataset, AB-RAG's stopping rule does no better than random stopping, I1's gain holds on unseen questions, and R1 helps static retrieval more than AB-RAG (Section~\ref{sec:fulltrace}).
 \end{enumerate}
+
+Table~\ref{tab:summary} summarizes the headline numbers.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{llccl}
+\toprule
+Setting & Measure & Paper & This work & Paired comparison \\
+\midrule
+\multicolumn{5}{l}{\emph{Released runs, 200 questions each: the paper's own answers, with I1 and I2}} \\
+Qwen-1.5B / HotpotQA & AB-RAG \EM{} & 34.5 & 38.5 & $+8/-0$, $p=0.008$ \\
+Llama-3.2-3B / HotpotQA & AB-RAG \EM{} & 45.0 & 48.0 & $+7/-1$, $p=0.07$ \\
+Claude / HotpotQA & AB-RAG \EM{} & 33.0 & 45.5 & $+25/-0$, $p<0.001$ \\
+Claude / TriviaQA & AB-RAG \EM{} & 40.0 & 46.5 & $+13/-0$, $p<0.001$ \\
+\midrule
+\multicolumn{5}{l}{\emph{Retrieval on the paper's benchmark setting, with R1}} \\
+HotpotQA & recall@5 / @10 & 86.6 / 94.0 & 92.9 / 96.4 & \\
+TriviaQA & recall@5 / @10 & 67.2 / 80.3 & 66.9 / 79.9 & no gain \\
+\midrule
+\multicolumn{5}{l}{\emph{New runs, 500 test questions each, Qwen-1.5B (``Paper'': the paper's pipeline, regenerated)}} \\
+HotpotQA & AB-RAG \EM{} & 38.0 & 44.2 (R1 + I1) & $+56/-25$, $p<0.001$ \\
+TriviaQA & AB-RAG \EM{} & 47.8 & 50.0 (I1) & $+11/-0$, $p<0.001$ \\
+HotpotQA & AB-RAG vs.\ random stopping & -- & 38.0 vs.\ 37.9 [37.0, 38.8] & $P=0.50$ \\
+TriviaQA & AB-RAG vs.\ random stopping & -- & 47.8 vs.\ 47.9 [46.8, 49.0] & $P=0.65$ \\
+\bottomrule
+\end{tabular}
+\caption{Headline results (accuracy and recall in \%). Top: I1 and I2 applied to the paper's released answers, paired question by question with the published answers. Middle: recall measured in one harness (Table~\ref{tab:r1}). Bottom: new full-trace runs; the last two rows compare AB-RAG with random stopping at the same retrieval budget, where $P$ is the share of random permutations at least as accurate as AB-RAG.}
+\label{tab:summary}
+\end{table}
+
+\section{Related work}
+\label{sec:related}
+
+\paragraph{Adaptive retrieval.} Retrieval-augmented generation \citep{lewis2020rag} retrieves a fixed number of passages for every input. Adaptive methods decide when and how much to retrieve. FLARE retrieves again when the next generated sentence contains low-probability tokens \citep{jiang2023flare}; DRAGIN triggers retrieval from token-level uncertainty and attention \citep{su2024dragin}; Self-RAG trains the generator to emit reflection tokens that request retrieval and critique its own output \citep{asai2024selfrag}; Adaptive-RAG routes each question to no, single-step or multi-step retrieval with a classifier of question complexity \citep{jeong2024adaptiverag}; and \citet{mallen2023when} retrieve only for questions about less popular entities. AB-RAG \citep{kamthan2026abrag} belongs to the uncertainty-triggered family, with a hand-weighted combination of answer probability, answer--evidence similarity and reranker-score spread. Such methods are usually compared with static retrieval at a fixed depth. We add a control that holds the retrieval budget fixed and randomizes which questions receive more of it.
+
+\paragraph{Evaluating open-domain QA.} Exact match and token F1 were introduced for extractive reading comprehension \citep{rajpurkar2016squad}. \citet{kamalloo2023evaluating} show that lexical matching underestimates the accuracy of large language models, whose correct answers are often longer than, or phrased differently from, the reference. We use a containment label as a transparent check that does not depend on wording, and show that the same problem reaches calibration estimates.
+
+\paragraph{Confidence signals.} The probability of generated tokens \citep{kadavath2022language} and the agreement among sampled answers \citep{kuhn2023semantic} are common confidence estimates for language models. \citet{kuhn2023semantic} cluster sampled answers by meaning so that rephrasings do not count as disagreement, a response to the same wording problem that affects exact match.
+
+\paragraph{Significance testing.} Differences of a few points on a few hundred questions are often within sampling noise, and paired significance tests are the recommended remedy for NLP comparisons \citep{bergkirkpatrick2012empirical,dror2018hitchhiker}. We follow this advice with exact McNemar tests and paired bootstrap intervals, and add a budget-matched random baseline, a control we have not seen used in evaluations of adaptive retrieval.
 
 \section{AB-RAG in brief}
 \label{sec:abrag}
@@ -320,23 +361,104 @@ Dataset & Retrieval & @5 & @10 & @15 & @20 & @50 \\
 \section{Full-trace protocol}
 \label{sec:fulltrace}
 
-The released logs contain only the rounds that AB-RAG executed, which limits what can be tested: thresholds above 0.6 cannot be replayed, and a stopping rule cannot be compared with chance. We therefore answer every question of both splits at every round ($K = 5, 10, 15$), with five sampled answers per round, and store all signals. Any stopping rule can then be replayed offline on identical answers: static retrieval at each $K$, AB-RAG at any $\tau$, AB-RAG with I2, an oracle that is correct if any round is correct, and a \textbf{budget-matched random control} that shuffles AB-RAG's stopping rounds across questions (2{,}000 permutations). The random control spends exactly AB-RAG's retrieval budget but ignores confidence, so AB-RAG beats it only if confidence picks the right questions to iterate on. The retrieval corpus pools the passages of all 800 questions (7,947 for HotpotQA and 11,124 for TriviaQA, against 4,963 and 2,582 in the paper), which makes retrieval harder (Appendix~\ref{app:recall}).
+The released logs contain only the rounds that AB-RAG executed, which limits what can be tested: thresholds above 0.6 cannot be replayed, and a stopping rule cannot be compared with chance. We therefore answer every test question at every round ($K = 5, 10, 15$), with five sampled answers per round, and store all signals. Any stopping rule can then be replayed offline on identical answers: static retrieval at each $K$, AB-RAG at any $\tau$, AB-RAG with I2, an oracle that is correct if any round is correct, and a \textbf{budget-matched random control} that shuffles AB-RAG's stopping rounds across questions (2{,}000 permutations). The random control spends exactly AB-RAG's retrieval budget but ignores confidence, so AB-RAG beats it only if confidence picks the right questions to iterate on. The retrieval corpus pools the passages of all 800 questions (7,947 for HotpotQA and 11,124 for TriviaQA, against 4,963 and 2,582 in the paper), which makes retrieval harder (Appendix~\ref{app:recall}).
 
-\pending{Results with Qwen2.5-1.5B-Instruct on the 500-question test splits: static $K$, AB-RAG at $\tau \in [0.3, 0.9]$, + I1, + I2, random control with 95\% interval and $P(\text{random} \ge \text{AB-RAG})$, oracle; under all three labels. Repeat N2 on the new traces. End-to-end QA with the R1 retriever on HotpotQA. Every pipeline paired against the base AB-RAG on all 500 questions and on questions 201--500 alone.}
+\subsection{Results on the new test split}
 
-\section{Discussion and limitations}
+We regenerate the paper's local configuration, Qwen2.5-1.5B-Instruct with the paper's weights, $\tau = 0.6$ and $K = 5, 10, 15$, on the 500 test questions of each dataset: HotpotQA with the paper's retrieval and with R1, and TriviaQA with the paper's retrieval, since R1 leaves TriviaQA retrieval unchanged (Section~\ref{sec:r1}). I1 is applied to every round's answer with its instruction frozen. On the paper's 200 HotpotQA questions the regenerated pipeline scores 34.0 \EM{} with static retrieval and 36.0 with AB-RAG, against the published 34.5 and 34.5 on a smaller corpus. Table~\ref{tab:fulltrace} gives every stopping rule under \EM{} and containment. \EM{}+alias differs from \EM{} only on TriviaQA and gives the same picture there (AB-RAG 55.8, random stopping 55.6 [54.6, 56.6]).
 
-The released runs support AB-RAG's \EM{} numbers but not the reading that adaptive retrieval makes answers more often correct. On the one run where the comparison can be paired, the advantage over static retrieval is tied to wording and disappears under a wording-independent label or when both systems receive the same extraction step. Confidence AUROC under \EM{} partly reflects answer length, and the confidence score is in effect a threshold on one signal.
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{llcccccccc}
+\toprule
+Dataset & Pipeline & $K{=}5$ & $K{=}10$ & $K{=}15$ & AB-RAG & Passages & Random [95\% int.] & $P$ & Oracle \\
+\midrule
+\multicolumn{10}{l}{\emph{\EM{}}} \\
+\multirow{4}{*}{HotpotQA} & paper retrieval & 38.0 & 36.2 & 37.6 & 38.0 & 7.4 & 37.9 [37.0, 38.8] & 0.50 & 45.4 \\
+& paper + I1 & 41.2 & 40.6 & 42.6 & 42.2 & 7.4 & 41.3 [40.4, 42.4] & 0.06 & 49.8 \\
+& R1 & 40.0 & 40.6 & 40.6 & 38.8 & 6.8 & 40.0 [39.2, 41.0] & 1.00 & 48.8 \\
+& R1 + I1 & 44.2 & 44.8 & 45.0 & 44.2 & 6.8 & 44.3 [43.4, 45.2] & 0.65 & 52.0 \\
+\multirow{2}{*}{TriviaQA} & paper retrieval & 47.8 & 47.4 & 48.8 & 47.8 & 8.1 & 47.9 [46.8, 49.0] & 0.65 & 55.0 \\
+& paper + I1 & 50.2 & 50.2 & 51.0 & 50.0 & 8.1 & 50.3 [49.2, 51.2] & 0.78 & 57.4 \\
+\midrule
+\multicolumn{10}{l}{\emph{Containment}} \\
+\multirow{4}{*}{HotpotQA} & paper retrieval & 48.8 & 49.6 & 50.0 & 50.0 & 7.4 & 48.9 [47.8, 50.0] & 0.03 & 58.4 \\
+& paper + I1 & 47.8 & 48.6 & 48.8 & 49.0 & 7.4 & 47.9 [46.8, 49.0] & 0.04 & 57.8 \\
+& R1 & 51.2 & 52.2 & 52.8 & 51.4 & 6.8 & 51.3 [50.4, 52.2] & 0.52 & 59.6 \\
+& R1 + I1 & 50.2 & 51.2 & 51.2 & 50.4 & 6.8 & 50.3 [49.4, 51.2] & 0.49 & 58.0 \\
+\multirow{2}{*}{TriviaQA} & paper retrieval & 66.6 & 67.2 & 66.6 & 67.0 & 8.1 & 66.6 [65.6, 67.6] & 0.32 & 74.0 \\
+& paper + I1 & 66.4 & 66.4 & 65.6 & 66.8 & 8.1 & 66.3 [65.2, 67.4] & 0.25 & 73.4 \\
+\bottomrule
+\end{tabular}
+\caption{Full traces on the 500 test questions per dataset (Qwen2.5-1.5B-Instruct, accuracy in \%). Static $K$ answers once from $K$ passages; AB-RAG stops at $\tau = 0.6$ and reads the mean number of passages shown (static $K$ reads $K$). Random stopping shuffles AB-RAG's stopping rounds across questions, so it reads the same passages; $P$ is the share of its 2{,}000 permutations at least as accurate as AB-RAG. Oracle counts a question as correct if any round answers it correctly.}
+\label{tab:fulltrace}
+\end{table}
 
-Our study has clear limits. Each released run covers 200 questions with one sample of the system, so differences of one or two points are within noise, as the confidence intervals show. Containment is a lenient label and over-credits answers that mention the reference while asserting something else; we report it next to \EM{}, not instead of it. I1 relies on a 1.5B-parameter extractor that sometimes picks the wrong phrase, and its instruction was revised once on the evaluated questions. We did not regenerate the Claude or Llama runs. The full-trace experiments use a single open model.
+\paragraph{Confidence-based stopping is no better than random stopping.} At $\tau = 0.6$, AB-RAG's \EM{} lies inside the 95\% interval of the random control in five of six pipelines and below it in the sixth (R1: 38.8 against 40.0 [39.2, 41.0]). Figure~\ref{fig:ftsweep} repeats the comparison at every threshold from 0.30 to 0.95 with 1{,}000 permutations each. Of the 100 combinations of pipeline, label and threshold at which AB-RAG and the control can differ, AB-RAG lies above the control's interval in eight, by at most 0.6 points and seven of them under containment, and below it in three, all under \EM{} with R1. AB-RAG never differs significantly from static $K=10$ (all $p > 0.18$), while reading 6.8 to 8.1 passages instead of 10. The stopping rounds explain why: confidence passes $\tau$ after the first round for 85 to 91\% of questions, so AB-RAG behaves almost like static retrieval with five passages, and with the paper's retrieval it has exactly the \EM{} of static $K=5$ on both datasets. More evidence barely helps this model, as static $K=5$ and $K=15$ differ by at most 1.4 points \EM{} in every pipeline. Yet for 7 to 10 points of questions some round does answer correctly (the oracle), so a stopping rule has room to gain; the confidence score does not find it.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_m_fulltrace_tau_sweep.png}
+\caption{\EM{} against mean passages read on the 500 test questions. Line: AB-RAG at $\tau$ from 0.30 to 0.95 (open circle at $\tau = 0.6$). Band: 95\% interval of random stopping with the same budget at each $\tau$; it closes where every question stops at the same round. Squares: static $K = 5, 10, 15$. Top row: answers as generated; bottom row: with I1.}
+\label{fig:ftsweep}
+\end{figure}
+
+\paragraph{N2 and N3 replicate.} Holding $S_2$ and $S_3$ at their run mean flips 3 of 602, 8 of 576 and 3 of 627 executed stop decisions (HotpotQA with the paper's retrieval, with R1, and TriviaQA). Across rounds, $S_2$ and $S_3$ together contribute a standard deviation of 0.008 to 0.010 to the confidence score, against 0.073 to 0.082 from $S_1$, and the first-round AUROC of the confidence score is within 0.01 of that of $S_1$ alone (0.648 vs.\ 0.652 on HotpotQA, 0.770 vs.\ 0.770 on TriviaQA). Answer brevity predicts \EM{}-correctness (AUROC 0.61 on both datasets) but not containment-correctness (0.46 and 0.43), as on the released runs.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{llccccc}
+\toprule
+Dataset & Change & Accuracy & $+/-$ & $p$ & 95\% CI (pts) & Questions 201--500: $\Delta$ ($p$) \\
+\midrule
+\multicolumn{7}{l}{\emph{\EM{}}} \\
+HotpotQA & I1 & 38.0 $\to$ 42.2 & $+21/-0$ & $<$0.001 & [$+$2.4, $+$6.0] & $+$4.7 ($<$0.001) \\
+TriviaQA & I1 & 47.8 $\to$ 50.0 & $+11/-0$ & $<$0.001 & [$+$1.0, $+$3.6] & $+$2.4 (0.016) \\
+HotpotQA & I2 & 38.0 $\to$ 38.0 & $+1/-1$ & 1.00 & [$-$0.6, $+$0.6] & $+$0.4 (1.00) \\
+TriviaQA & I2 & 47.8 $\to$ 47.6 & $+0/-1$ & 1.00 & [$-$0.6, $+$0.0] & $-$0.3 (1.00) \\
+HotpotQA & R1, static $K{=}10$ & 36.2 $\to$ 40.6 & $+44/-22$ & 0.009 & [$+$1.2, $+$7.6] & $+$4.3 (0.053) \\
+HotpotQA & R1, AB-RAG & 38.0 $\to$ 38.8 & $+36/-32$ & 0.72 & [$-$2.4, $+$4.0] & $+$0.7 (0.87) \\
+HotpotQA & R1 + I1, static $K{=}10$ & 36.2 $\to$ 44.8 & $+62/-19$ & $<$0.001 & [$+$5.2, $+$12.2] & $+$8.3 ($<$0.001) \\
+HotpotQA & R1 + I1, AB-RAG & 38.0 $\to$ 44.2 & $+56/-25$ & $<$0.001 & [$+$2.8, $+$9.8] & $+$6.0 (0.013) \\
+\midrule
+\multicolumn{7}{l}{\emph{Containment}} \\
+HotpotQA & I1 & 50.0 $\to$ 49.0 & $+0/-5$ & 0.06 & [$-$2.0, $-$0.2] & $-$0.3 (1.00) \\
+TriviaQA & I1 & 67.0 $\to$ 66.8 & $+0/-1$ & 1.00 & [$-$0.6, $+$0.0] & $-$0.4 (1.00) \\
+HotpotQA & R1, static $K{=}10$ & 49.6 $\to$ 52.2 & $+45/-32$ & 0.17 & [$-$0.8, $+$6.0] & $+$2.7 (0.30) \\
+HotpotQA & R1, AB-RAG & 50.0 $\to$ 51.4 & $+46/-39$ & 0.52 & [$-$2.2, $+$5.0] & $+$0.7 (0.89) \\
+HotpotQA & R1 + I1, static $K{=}10$ & 49.6 $\to$ 51.2 & $+44/-36$ & 0.43 & [$-$2.0, $+$5.2] & $+$1.7 (0.56) \\
+HotpotQA & R1 + I1, AB-RAG & 50.0 $\to$ 50.4 & $+46/-44$ & 0.92 & [$-$3.4, $+$4.2] & $+$0.3 (1.00) \\
+\bottomrule
+\end{tabular}
+\caption{Each change against the base pipeline (the paper's retrieval, answers as generated) under the same stopping policy, paired question by question on the 500 test questions: questions gained and lost, McNemar exact $p$, and a paired bootstrap 95\% interval. The last column repeats the comparison on questions 201--500, which are outside the paper's runs and played no part in revising I1. Under containment I2 changes two labels per dataset (HotpotQA $+1/-1$, TriviaQA $+2/-0$, $p \ge 0.50$).}
+\label{tab:ftpaired}
+\end{table}
+
+\paragraph{I1 holds on unseen questions; I2 has nothing to select.} Table~\ref{tab:ftpaired} pairs each change with the base pipeline question by question. I1 raises \EM{} by 4.2 points on HotpotQA and 2.2 on TriviaQA without turning a single \EM{}-correct answer wrong, and the gain holds on questions 201--500, which played no part in revising its instruction ($+4.7$, $p<0.001$, and $+2.4$, $p=0.016$). Containment falls by 1.0 and 0.2 points. I2 changes the \EM{} label of at most two answers per dataset: with 1.2 rounds on average there is rarely an earlier, more confident round to return.
+
+\paragraph{R1 helps static retrieval but not AB-RAG.} The stronger reranker raises static $K=10$ \EM{} on HotpotQA from 36.2 to 40.6 ($p=0.009$; $+4.3$ on questions 201--500, $p=0.053$) and containment by 2.6 points ($p=0.17$). AB-RAG gains only 0.8 points ($p=0.72$): R1 raises first-round \EM{} by 2.0 points, but the few questions AB-RAG sends to further rounds then lose more answers than they gain ($-1.2$ points against stopping after the first round). With R1 and I1 together, AB-RAG reaches 44.2 \EM{} ($+6.2$ over the base pipeline, $p<0.001$; $+6.0$ on questions 201--500, $p=0.013$), and static $K=10$ with the same two changes reaches 44.8 ($+8.6$ over static $K=10$ with the paper's retrieval). Neither combination raises containment significantly, so most of the \EM{} gain is again answer format, with a smaller part from retrieval.
+
+\section{Discussion}
+
+The released runs support AB-RAG's \EM{} numbers but not the reading that adaptive retrieval makes answers more often correct. On the one run where the comparison can be paired, the advantage over static retrieval is tied to wording and disappears under a wording-independent label or when both systems receive the same extraction step. Confidence AUROC under \EM{} partly reflects answer length, and the confidence score is in effect a threshold on one signal. The full traces test the remaining claim directly: with the paper's open model, choosing which questions to iterate on by confidence is no better than choosing them at random, although the oracle shows that the right round exists for 7 to 10 points of questions. A useful stopping rule would need a signal that separates those questions, which the token-probability signal $S_1$ does not.
+
+For practitioners the results suggest a simple order of work. Fixing the answer format (I1) is cheap and gives the largest \EM{} gain; a stronger reranker (R1) helps every pipeline that reads few passages; and an adaptive stopping rule should be adopted only after it beats random stopping with the same budget on the model it will serve.
 
 \section{Conclusion}
 
-Re-scoring released runs is cheap and revealing. For AB-RAG it confirms the published numbers, locates four inconsistencies, and shows that the reported gains and calibration depend on answer wording more than on retrieval decisions. Simple, transparent post-processing raises exact match by 3 to 12.5 points without making more answers contain the reference, which argues for reporting a wording-independent label, paired tests, and a budget-matched random control whenever adaptive retrieval is evaluated with exact match.
+Re-scoring released runs is cheap and revealing. For AB-RAG it confirms the published numbers, locates four inconsistencies, and shows that the reported gains and calibration depend on answer wording more than on retrieval decisions. Simple, transparent post-processing raises exact match by 3 to 12.5 points without making more answers contain the reference, and on 500 new questions per dataset the confidence-based stopping rule matches a random rule with the same budget. Together these argue for reporting a wording-independent label, paired tests, and a budget-matched random control whenever adaptive retrieval is evaluated with exact match.
+
+\section*{Limitations}
+
+Each released run covers 200 questions with one sample of the system, so differences of one or two points are within noise, as the confidence intervals show. Containment is a lenient label and over-credits answers that mention the reference while asserting something else; we report it next to \EM{}, not instead of it. I1 relies on a 1.5B-parameter extractor that sometimes picks the wrong phrase, and its instruction was revised once on the evaluated questions. We did not regenerate the Claude or Llama runs. The full-trace experiments use a single open model of 1.5B parameters, for which more evidence changes \EM{} by at most 1.4 points, so they test AB-RAG where adaptive retrieval has little to gain on average; a larger generator that uses additional passages better could leave a stopping rule more room. R1 was evaluated end to end on HotpotQA only, and we tested three cross-encoders, not the full space of rerankers.
 
 \section*{Reproducibility and ethics statement}
 
-All analyses use the code, data and logs released with AB-RAG under the MIT license, which we cite and credit; we did not reuse its text or figures. Our code recomputes every number in this paper from the saved outputs. No new paid API calls were made; the extraction step and the new traces run on a single consumer or free cloud GPU. The datasets are public question-answering benchmarks without personal data.
+All analyses use the code, data and logs released with AB-RAG under the MIT license, which we cite and credit; we did not reuse its text or figures. Our code recomputes every number in this paper from the saved outputs. No new paid API calls were made. The extraction step runs on a single consumer GPU; the full traces took about 20 minutes on three data-center GPUs, and the released notebook reproduces them on one free cloud GPU in several hours. The datasets are public question-answering benchmarks without personal data.
 
 \bibliographystyle{plainnat}
 \bibliography{refs}
